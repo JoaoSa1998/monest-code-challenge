@@ -15,6 +15,7 @@ import { ViaCepAdapter } from '../adapters/viacep.adapter';
 @Injectable()
 export class CepProviderFactory {
   private readonly providers: Record<CepProviderName, CepProviderPort>;
+  private readonly providerNames: CepProviderName[];
   private nextProviderIndex = 0;
 
   constructor(
@@ -26,13 +27,16 @@ export class CepProviderFactory {
       viacep: viaCepAdapter,
       brasilapi: brasilApiAdapter,
     };
+    this.providerNames = Object.keys(this.providers);
 
     const preferredProvider = this.configService.get<CepProviderName>(
       'cep.provider',
       'viacep',
     );
 
-    this.nextProviderIndex = preferredProvider === 'brasilapi' ? 1 : 0;
+    const preferredProviderIndex = this.providerNames.indexOf(preferredProvider);
+    this.nextProviderIndex =
+      preferredProviderIndex >= 0 ? preferredProviderIndex : 0;
   }
 
   async findByCep(cep: string): Promise<CepResult> {
@@ -70,15 +74,15 @@ export class CepProviderFactory {
   }
 
   private getProviderOrder(): CepProviderPort[] {
-    const providerNames: CepProviderName[] = ['viacep', 'brasilapi'];
     const startIndex = this.nextProviderIndex;
 
-    this.nextProviderIndex = (this.nextProviderIndex + 1) % providerNames.length;
+    this.nextProviderIndex =
+      (this.nextProviderIndex + 1) % this.providerNames.length;
 
-    return [
-      this.providers[providerNames[startIndex]],
-      this.providers[providerNames[(startIndex + 1) % providerNames.length]],
-    ];
+    return this.providerNames.map((_, index) => {
+      const rotatedIndex = (startIndex + index) % this.providerNames.length;
+      return this.providers[this.providerNames[rotatedIndex]];
+    });
   }
 
   private async delay(ms: number): Promise<void> {

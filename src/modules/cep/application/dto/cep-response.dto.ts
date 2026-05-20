@@ -16,6 +16,6 @@ export class CepResponseDto {
   @ApiProperty({ example: 'AM' })
   state!: string;
 
-  @ApiProperty({ enum: ['viacep', 'brasilapi'], example: 'viacep' })
-  provider!: 'viacep' | 'brasilapi';
+  @ApiProperty({ example: 'viacep' })
+  provider!: string;
 }

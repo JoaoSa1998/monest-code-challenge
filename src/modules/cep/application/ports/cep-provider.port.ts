@@ -1,6 +1,6 @@
 import { CepResult } from '../../domain/types/cep-result.type';
 
-export type CepProviderName = 'viacep' | 'brasilapi';
+export type CepProviderName = string;
 
 export interface CepProviderPort {
   readonly providerName: CepProviderName;
