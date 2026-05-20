@@ -6,6 +6,9 @@ export const envValidationSchema = Joi.object({
     .default('development'),
   PORT: Joi.number().port().default(3000),
   CEP_PROVIDER: Joi.string().valid('viacep', 'brasilapi').default('viacep'),
+  ATTEMPTS_LIMIT: Joi.number().integer().min(1).default(2),
+  RETRY_DELAY: Joi.number().integer().min(0).default(0),
+  CEP_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(3000),
   VIACEP_BASE_URL: Joi.string()
     .uri({ scheme: ['http', 'https'] })
     .default('https://viacep.com.br/ws'),
