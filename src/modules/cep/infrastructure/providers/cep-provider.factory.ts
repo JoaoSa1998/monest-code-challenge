@@ -29,14 +29,16 @@ export class CepProviderFactory {
     };
     this.providerNames = Object.keys(this.providers);
 
+
+    //Preference  provider defined in the config :P
+
     const preferredProvider = this.configService.get<CepProviderName>(
       'cep.provider',
       'viacep',
     );
 
     const preferredProviderIndex = this.providerNames.indexOf(preferredProvider);
-    this.nextProviderIndex =
-      preferredProviderIndex >= 0 ? preferredProviderIndex : 0;
+    this.nextProviderIndex =preferredProviderIndex >= 0 ? preferredProviderIndex : 0;
   }
 
   async findByCep(cep: string): Promise<CepResult> {
@@ -76,8 +78,7 @@ export class CepProviderFactory {
   private getProviderOrder(): CepProviderPort[] {
     const startIndex = this.nextProviderIndex;
 
-    this.nextProviderIndex =
-      (this.nextProviderIndex + 1) % this.providerNames.length;
+    this.nextProviderIndex =(this.nextProviderIndex + 1) % this.providerNames.length;
 
     return this.providerNames.map((_, index) => {
       const rotatedIndex = (startIndex + index) % this.providerNames.length;
