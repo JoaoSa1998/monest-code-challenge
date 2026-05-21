@@ -1,4 +1,4 @@
-import { Controller, Get, HttpStatus, Param, Res } from '@nestjs/common';
+import { Controller, Get, Param } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiInternalServerErrorResponse,
@@ -9,11 +9,9 @@ import {
   ApiServiceUnavailableResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import type { Response } from 'express';
 import { CepResponseDto } from '../application/dto/cep-response.dto';
 import { GetCepUseCase } from '../application/use-cases/get-cep.use-case';
-import { AppFailure } from '../../shared/domain/types/app-result.type';
-import { CepErrorCode } from '../domain/types/cep-error-code.type';
+import { AppFailureHttpException } from '../../shared/presentation/exceptions/app-failure-http.exception';
 
 @ApiTags('cep')
 @Controller('cep')
@@ -39,18 +37,13 @@ export class CepController {
     description: 'Unexpected CEP lookup error',
   })
   @Get(':cep')
-  async getCep(
-    @Param('cep') cep: string,
-    @Res({ passthrough: true }) response: Response,
-  ): Promise<CepResponseDto | AppFailure<CepErrorCode>> {
+  async getCep(@Param('cep') cep: string): Promise<CepResponseDto> {
     const result = await this.getCepUseCase.execute(cep);
 
     if (!result.ok) {
-      return result;
+      throw AppFailureHttpException.fromFailure(result);
     }
 
     return result.data;
   }
-
- 
 }
