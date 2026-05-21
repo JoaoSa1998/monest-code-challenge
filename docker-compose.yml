@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile
     container_name: monest-api
     env_file:
-      - ./api/.env
+      - ./.env
     ports:
       - "3000:3000"
     restart: unless-stopped
