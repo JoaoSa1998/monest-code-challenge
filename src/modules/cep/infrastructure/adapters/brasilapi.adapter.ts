@@ -1,18 +1,16 @@
-import {
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   CepProviderName,
   CepProviderPort,
 } from '../../application/ports/cep-provider.port';
 import {
-  AppFailure,
   AppResult,
 } from '../../../shared/domain/types/app-result.type';
 import { CepErrorCode } from '../../domain/types/cep-error-code.type';
 import { CepResult } from '../../domain/types/cep-result.type';
+import { AsyncDelayService } from '../../../shared/infrastructure/services/async-delay.service';
+import { AppFailureService } from '../../../shared/infrastructure/services/app-failure.service';
 import {
   BrasilApiMapper,
   BrasilApiResponse,
@@ -21,84 +19,59 @@ import {
 @Injectable()
 export class BrasilApiAdapter implements CepProviderPort {
   readonly providerName: CepProviderName = 'brasilapi';
-  private readonly logger = new Logger(BrasilApiAdapter.name);
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly asyncDelayService: AsyncDelayService,
+    private readonly appFailureService: AppFailureService,
+  ) {}
 
   async findByCep(cep: string): Promise<AppResult<CepResult, CepErrorCode>> {
     const baseUrl = this.configService.getOrThrow<string>(
       'cep.providers.brasilapi.baseUrl',
     );
+    const simulatedDelayMs = this.configService.get<number>(
+      'cep.providers.brasilapi.simulatedDelayMs',
+      0,
+    );
     const timeout = this.configService.get<number>('cep.requestTimeoutMs', 3000);
+    const signal = AbortSignal.timeout(timeout);
 
     try {
+      await this.asyncDelayService.wait(simulatedDelayMs, signal);
+
       const response = await fetch(`${baseUrl}/${cep}`, {
-        signal: AbortSignal.timeout(timeout),
+        signal,
       });
 
       if (response.status === 404) {
-        return this.buildFailure('not_found', 'CEP not found', 'low');
+        return this.appFailureService.createFailure({
+          code: 'not_found',
+          message: 'CEP not found',
+          severity: 'low',
+          source: this.providerName,
+        });
       }
 
       if (!response.ok) {
-        return this.buildFailure(
-          'provider_unavailable',
-          'BrasilAPI is unavailable',
-          'high',
-        );
+        return this.appFailureService.createFailure({
+          code: 'provider_unavailable',
+          message: 'BrasilAPI is unavailable',
+          severity: 'high',
+          source: this.providerName,
+        });
       }
 
       const payload = (await response.json()) as BrasilApiResponse;
       return BrasilApiMapper.toDomain(payload);
     } catch (error) {
-      return this.handleProviderError(error, 'BrasilAPI');
+      return this.appFailureService.mapTransportError<CepErrorCode>(error, {
+        source: this.providerName,
+        timeoutCode: 'provider_timeout',
+        timeoutMessage: 'BrasilAPI timed out',
+        unexpectedCode: 'unexpected_error',
+        unexpectedMessage: 'Unexpected BrasilAPI error',
+      });
     }
-  }
-
-  private handleProviderError(
-    error: unknown,
-    provider: string,
-  ): AppFailure<CepErrorCode> {
-    if (error instanceof Error && error.name === 'TimeoutError') {
-      return this.buildFailure(
-        'provider_timeout',
-        `${provider} timed out`,
-        'high',
-      );
-    }
-
-    return this.buildFailure(
-      'unexpected_error',
-      `Unexpected ${provider} error`,
-      'critical',
-    );
-  }
-
-  private buildFailure(
-    code: AppFailure<CepErrorCode>['code'],
-    message: string,
-    severity: AppFailure<CepErrorCode>['severity'],
-  ): AppFailure<CepErrorCode> {
-    const failure: AppFailure<CepErrorCode> = {
-      ok: false,
-      code,
-      message,
-      severity,
-      source: this.providerName,
-    };
-
-    this.logFailure(failure);
-    return failure;
-  }
-
-  private logFailure(failure: AppFailure<CepErrorCode>): void {
-    const context = `[${failure.severity}] [${failure.source}] ${failure.message}`;
-
-    if (failure.severity === 'low') {
-      this.logger.warn(context);
-      return;
-    }
-
-    this.logger.error(context);
   }
 }

@@ -11,6 +11,7 @@ import { CepModule } from './modules/cep/cep.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: ['.env', '.env.example'],
       load: [appConfig, cepConfig],
       validationSchema: envValidationSchema,
     }),

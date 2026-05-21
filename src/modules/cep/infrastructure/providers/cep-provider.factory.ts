@@ -20,6 +20,10 @@ import { ViaCepAdapter } from '../adapters/viacep.adapter';
 export class CepProviderFactory {
   private readonly providers: Record<CepProviderName, CepProviderPort>;
   private readonly providerNames: CepProviderName[];
+  private readonly providerState: Record<
+    CepProviderName,
+    { consecutiveFailures: number; cooldownUntil: number | null }
+  >;
   private nextProviderIndex = 0;
   private readonly logger = new Logger(CepProviderFactory.name);
 
@@ -33,6 +37,19 @@ export class CepProviderFactory {
       brasilapi: brasilApiAdapter,
     };
     this.providerNames = Object.keys(this.providers);
+    this.providerState = this.providerNames.reduce(
+      (state, providerName) => {
+        state[providerName] = {
+          consecutiveFailures: 0,
+          cooldownUntil: null,
+        };
+        return state;
+      },
+      {} as Record<
+        CepProviderName,
+        { consecutiveFailures: number; cooldownUntil: number | null }
+      >,
+    );
 
 
     //Preference  provider defined in the config :P
@@ -58,10 +75,12 @@ export class CepProviderFactory {
       const result = await provider.findByCep(cep);
 
       if (result.ok) {
+        this.resetProviderState(provider.providerName);
         return result;
       }
 
       lastFailure = result;
+      this.updateProviderState(provider.providerName, result);
 
       if (result.code === 'not_found') {
         notFoundCount += 1;
@@ -103,17 +122,86 @@ export class CepProviderFactory {
   }
 
   private getProviderOrder(): CepProviderPort[] {
-    const startIndex = this.nextProviderIndex;
+    const availableProviderNames = this.providerNames.filter((providerName) =>
+      this.isProviderAvailable(providerName),
+    );
+    const providerNamesForRotation =
+      availableProviderNames.length > 0
+        ? availableProviderNames
+        : this.providerNames;
 
-    this.nextProviderIndex =(this.nextProviderIndex + 1) % this.providerNames.length;
+    const normalizedStartIndex =
+      this.nextProviderIndex % providerNamesForRotation.length;
 
-    return this.providerNames.map((_, index) => {
-      const rotatedIndex = (startIndex + index) % this.providerNames.length;
-      return this.providers[this.providerNames[rotatedIndex]];
+    this.nextProviderIndex =
+      (this.nextProviderIndex + 1) % providerNamesForRotation.length;
+
+    return providerNamesForRotation.map((_, index) => {
+      const rotatedIndex =
+        (normalizedStartIndex + index) % providerNamesForRotation.length;
+      return this.providers[providerNamesForRotation[rotatedIndex]];
     });
   }
 
   private async delay(ms: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private isProviderAvailable(providerName: CepProviderName): boolean {
+    const cooldownUntil = this.providerState[providerName].cooldownUntil;
+
+    if (cooldownUntil === null) {
+      return true;
+    }
+
+    if (Date.now() >= cooldownUntil) {
+      this.providerState[providerName].cooldownUntil = null;
+      return true;
+    }
+
+    return false;
+  }
+
+  private updateProviderState(
+    providerName: CepProviderName,
+    result: AppFailure<CepErrorCode>,
+  ): void {
+    if (
+      result.code !== 'provider_timeout' &&
+      result.code !== 'provider_unavailable'
+    ) {
+      this.resetProviderState(providerName);
+      return;
+    }
+
+    const providerFailureStreakLimit = this.configService.get<number>(
+      'cep.providerFailureStreakLimit',
+      2,
+    );
+    const providerCooldownMs = this.configService.get<number>(
+      'cep.providerCooldownMs',
+      30000,
+    );
+    const state = this.providerState[providerName];
+
+    state.consecutiveFailures += 1;
+
+    if (state.consecutiveFailures < providerFailureStreakLimit) {
+      return;
+    }
+
+    state.cooldownUntil = Date.now() + providerCooldownMs;
+    state.consecutiveFailures = 0;
+
+    this.logger.warn(
+      `[medium] [${providerName}] provider entered cooldown for ${providerCooldownMs}ms after consecutive failures`,
+    );
+  }
+
+  private resetProviderState(providerName: CepProviderName): void {
+    this.providerState[providerName] = {
+      consecutiveFailures: 0,
+      cooldownUntil: null,
+    };
   }
 }
