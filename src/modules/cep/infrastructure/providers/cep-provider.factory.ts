@@ -13,6 +13,8 @@ import {
 } from '../../../shared/domain/types/app-result.type';
 import { CepErrorCode } from '../../domain/types/cep-error-code.type';
 import { CepResult } from '../../domain/types/cep-result.type';
+import { AsyncDelayService } from '../../../shared/infrastructure/services/async-delay.service';
+import { AppFailureService } from '../../../shared/infrastructure/services/app-failure.service';
 import { BrasilApiAdapter } from '../adapters/brasilapi.adapter';
 import { ViaCepAdapter } from '../adapters/viacep.adapter';
 
@@ -29,6 +31,8 @@ export class CepProviderFactory {
 
   constructor(
     private readonly configService: ConfigService,
+    private readonly asyncDelayService: AsyncDelayService,
+    private readonly appFailureService: AppFailureService,
     viaCepAdapter: ViaCepAdapter,
     brasilApiAdapter: BrasilApiAdapter,
   ) {
@@ -69,6 +73,7 @@ export class CepProviderFactory {
     const providerOrder = this.getProviderOrder();
     let lastFailure: AppFailure<CepErrorCode> | null = null;
     let notFoundCount = 0;
+    const unavailableProviders = new Set<CepProviderName>();
 
     for (let attempt = 0; attempt < attemptsLimit; attempt++) {
       const provider = providerOrder[attempt % providerOrder.length];
@@ -86,38 +91,45 @@ export class CepProviderFactory {
         notFoundCount += 1;
       }
 
+      if (
+        result.code === 'provider_timeout' ||
+        result.code === 'provider_unavailable'
+      ) {
+        unavailableProviders.add(provider.providerName);
+      }
+
       if (attempt < attemptsLimit - 1 && retryDelay > 0) {
-        await this.delay(retryDelay);
+        await this.asyncDelayService.wait(retryDelay);
       }
     }
 
     if (notFoundCount === attemptsLimit) {
-      const failure: AppFailure<CepErrorCode> = {
-        ok: false,
+      return this.appFailureService.createFailure({
         code: 'not_found',
         message: 'CEP not found',
         severity: 'low',
         source: 'cep',
-      };
-      this.logger.warn(
-        `[${failure.severity}] CEP lookup ended with not_found after ${attemptsLimit} attempts`,
-      );
-      return failure;
+      });
+    }
+
+    if (unavailableProviders.size === this.providerNames.length) {
+      return this.appFailureService.createFailure({
+        code: 'provider_unavailable',
+        message: 'All CEP providers are unavailable',
+        severity: 'critical',
+        source: 'cep',
+      });
     }
 
     const fallbackFailure =
       lastFailure ??
-      ({
-        ok: false,
+      this.appFailureService.createFailure({
         code: 'provider_unavailable',
         message: 'CEP providers are unavailable',
         severity: 'high',
         source: 'cep',
-      } satisfies AppFailure<CepErrorCode>);
+      });
 
-    this.logger.error(
-      `[${fallbackFailure.severity}] CEP lookup failed after ${attemptsLimit} attempts`,
-    );
     return fallbackFailure;
   }
 
@@ -141,10 +153,6 @@ export class CepProviderFactory {
         (normalizedStartIndex + index) % providerNamesForRotation.length;
       return this.providers[providerNamesForRotation[rotatedIndex]];
     });
-  }
-
-  private async delay(ms: number): Promise<void> {
-    await new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private isProviderAvailable(providerName: CepProviderName): boolean {
