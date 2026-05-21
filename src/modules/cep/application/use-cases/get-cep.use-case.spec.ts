@@ -13,12 +13,15 @@ describe('GetCepUseCase', () => {
           provide: CepProviderFactory,
           useValue: {
             findByCep: jest.fn().mockResolvedValue({
-              cep: '69000000',
-              street: 'Rua Example',
-              neighborhood: 'Centro',
-              city: 'Manaus',
-              state: 'AM',
-              provider: 'viacep',
+              ok: true,
+              data: {
+                cep: '69000000',
+                street: 'Rua Example',
+                neighborhood: 'Centro',
+                city: 'Manaus',
+                state: 'AM',
+                provider: 'viacep',
+              },
             }),
           },
         },
@@ -30,12 +33,15 @@ describe('GetCepUseCase', () => {
 
   it('should normalize the cep and return the provider response', async () => {
     await expect(useCase.execute('69000-000')).resolves.toEqual({
-      cep: '69000000',
-      street: 'Rua Example',
-      neighborhood: 'Centro',
-      city: 'Manaus',
-      state: 'AM',
-      provider: 'viacep',
+      ok: true,
+      data: {
+        cep: '69000000',
+        street: 'Rua Example',
+        neighborhood: 'Centro',
+        city: 'Manaus',
+        state: 'AM',
+        provider: 'viacep',
+      },
     });
   });
 });

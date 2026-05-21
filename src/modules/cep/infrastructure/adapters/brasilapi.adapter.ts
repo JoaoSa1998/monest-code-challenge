@@ -1,14 +1,17 @@
 import {
   Injectable,
-  InternalServerErrorException,
-  NotFoundException,
-  ServiceUnavailableException,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   CepProviderName,
   CepProviderPort,
 } from '../../application/ports/cep-provider.port';
+import {
+  AppFailure,
+  AppResult,
+} from '../../../shared/domain/types/app-result.type';
+import { CepErrorCode } from '../../domain/types/cep-error-code.type';
 import { CepResult } from '../../domain/types/cep-result.type';
 import {
   BrasilApiMapper,
@@ -18,10 +21,11 @@ import {
 @Injectable()
 export class BrasilApiAdapter implements CepProviderPort {
   readonly providerName: CepProviderName = 'brasilapi';
+  private readonly logger = new Logger(BrasilApiAdapter.name);
 
   constructor(private readonly configService: ConfigService) {}
 
-  async findByCep(cep: string): Promise<CepResult> {
+  async findByCep(cep: string): Promise<AppResult<CepResult, CepErrorCode>> {
     const baseUrl = this.configService.getOrThrow<string>(
       'cep.providers.brasilapi.baseUrl',
     );
@@ -33,32 +37,68 @@ export class BrasilApiAdapter implements CepProviderPort {
       });
 
       if (response.status === 404) {
-        throw new NotFoundException('CEP not found');
+        return this.buildFailure('not_found', 'CEP not found', 'low');
       }
 
       if (!response.ok) {
-        throw new ServiceUnavailableException('BrasilAPI is unavailable');
+        return this.buildFailure(
+          'provider_unavailable',
+          'BrasilAPI is unavailable',
+          'high',
+        );
       }
 
       const payload = (await response.json()) as BrasilApiResponse;
       return BrasilApiMapper.toDomain(payload);
     } catch (error) {
-      this.rethrowProviderError(error, 'BrasilAPI');
+      return this.handleProviderError(error, 'BrasilAPI');
     }
   }
 
-  private rethrowProviderError(error: unknown, provider: string): never {
-    if (
-      error instanceof NotFoundException ||
-      error instanceof ServiceUnavailableException
-    ) {
-      throw error;
-    }
-
+  private handleProviderError(
+    error: unknown,
+    provider: string,
+  ): AppFailure<CepErrorCode> {
     if (error instanceof Error && error.name === 'TimeoutError') {
-      throw new ServiceUnavailableException(`${provider} timed out`);
+      return this.buildFailure(
+        'provider_timeout',
+        `${provider} timed out`,
+        'high',
+      );
     }
 
-    throw new InternalServerErrorException(`Unexpected ${provider} error`);
+    return this.buildFailure(
+      'unexpected_error',
+      `Unexpected ${provider} error`,
+      'critical',
+    );
+  }
+
+  private buildFailure(
+    code: AppFailure<CepErrorCode>['code'],
+    message: string,
+    severity: AppFailure<CepErrorCode>['severity'],
+  ): AppFailure<CepErrorCode> {
+    const failure: AppFailure<CepErrorCode> = {
+      ok: false,
+      code,
+      message,
+      severity,
+      source: this.providerName,
+    };
+
+    this.logFailure(failure);
+    return failure;
+  }
+
+  private logFailure(failure: AppFailure<CepErrorCode>): void {
+    const context = `[${failure.severity}] [${failure.source}] ${failure.message}`;
+
+    if (failure.severity === 'low') {
+      this.logger.warn(context);
+      return;
+    }
+
+    this.logger.error(context);
   }
 }

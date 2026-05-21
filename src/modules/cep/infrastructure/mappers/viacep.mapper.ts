@@ -1,4 +1,5 @@
-import { NotFoundException } from '@nestjs/common';
+import { AppResult } from '../../../shared/domain/types/app-result.type';
+import { CepErrorCode } from '../../domain/types/cep-error-code.type';
 import { CepResult } from '../../domain/types/cep-result.type';
 
 export type ViaCepResponse = {
@@ -11,18 +12,27 @@ export type ViaCepResponse = {
 };
 
 export class ViaCepMapper {
-  static toDomain(response: ViaCepResponse): CepResult {
+  static toDomain(response: ViaCepResponse): AppResult<CepResult, CepErrorCode> {
     if (response.erro) {
-      throw new NotFoundException('CEP not found');
+      return {
+        ok: false,
+        code: 'not_found',
+        message: 'CEP not found',
+        severity: 'low',
+        source: 'viacep',
+      };
     }
 
     return {
+      ok: true,
+      data: {
       cep: response.cep.replace(/\D/g, ''),
       street: response.logradouro,
       neighborhood: response.bairro,
       city: response.localidade,
       state: response.uf,
       provider: 'viacep',
+      },
     };
   }
 }
